@@ -720,8 +720,8 @@ export default function TVPage({
 
   const webviewKey = useMemo(
     () =>
-      `${playing}|${playerSource}|${resolvedPlayerUrl ?? ''}|${M3u8Url ?? ''}`,
-    [playing, playerSource, resolvedPlayerUrl, M3u8Url],
+      `${playing}|${playerSource}|${resolvedPlayerUrl ?? ''}|${m3u8Url ?? ''}`,
+    [playing, playerSource, resolvedPlayerUrl, m3u8Url],
   );
 
   useEffect(() => {
