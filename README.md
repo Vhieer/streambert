@@ -1,15 +1,18 @@
-[![Downloads@latest](https://img.shields.io/github/downloads/truelockmc/streambert/latest/total?style=for-the-badge)](https://github.com/truelockmc/streambert/releases/latest/)
-[![Release Version Badge](https://img.shields.io/github/v/release/truelockmc/streambert?style=for-the-badge)](https://github.com/truelockmc/streambert/releases)
-[![Issues Badge](https://img.shields.io/github/issues/truelockmc/streambert?style=for-the-badge)](https://github.com/truelockmc/streambert/issues)
-[![Closed Issues Badge](https://img.shields.io/github/issues-closed/truelockmc/streambert?color=%238256d0&style=for-the-badge)](https://github.com/truelockmc/streambert/issues?q=is%3Aissue+is%3Aclosed)<br>
+[![Downloads@latest](https://img.shields.io/github/downloads/Vhieer/streambert/latest/total?style=for-the-badge)](https://github.com/Vhieer/streambert/releases/latest/)
+[![Release Version Badge](https://img.shields.io/github/v/release/Vhieer/streambert?style=for-the-badge)](https://github.com/Vhieer/streambert/releases)
+[![Issues Badge](https://img.shields.io/github/issues/Vhieer/streambert?style=for-the-badge)](https://github.com/Vhieer/streambert/issues)
+[![Closed Issues Badge](https://img.shields.io/github/issues-closed/Vhieer/streambert?color=%238256d0&style=for-the-badge)](https://github.com/Vhieer/streambert/issues?q=is%3Aissue+is%3Aclosed)<br>
 
-[![GitHub](https://img.shields.io/badge/GitHub-truelockmc%2Fstreambert-181717?style=for-the-badge&logo=github)](https://github.com/truelockmc/streambert)
-[![Codeberg](https://img.shields.io/badge/Codeberg-truelockmc%2Fstreambert-2185D0?style=for-the-badge&logo=codeberg)](https://codeberg.org/truelockmc/streambert)
+[![GitHub](https://img.shields.io/badge/GitHub-Vhieer%2Fstreambert-181717?style=for-the-badge&logo=github)](https://github.com/Vhieer/streambert)
+[![Upstream](https://img.shields.io/badge/Upstream-truelockmc%2Fstreambert-555?style=for-the-badge&logo=github)](https://github.com/truelockmc/streambert)
 [![AUR Version](https://img.shields.io/aur/version/streambert-bin?style=for-the-badge&logo=archlinux)](https://aur.archlinux.org/packages/streambert-bin)
 # Streambert
 A cross-platform Electron Desktop App to stream and download any Movie, TV Series or Anime in the World. Zero Ads and Tracking <br></br>
+
+This fork adds AnimePahe fallback support for anime playback when AllManga/AllAnime cannot find a title or playable episode source.
+
 ![Logo](public/logo.svg)
-[Installation](https://github.com/truelockmc/streambert?tab=readme-ov-file#requirements)
+[Installation](https://github.com/Vhieer/streambert?tab=readme-ov-file#requirements)
 
 ## Why Streambert?
 - 🎦 **Streaming:** Stream any Movie, Anime or TV Series from around the World.
@@ -31,7 +34,7 @@ A cross-platform Electron Desktop App to stream and download any Movie, TV Serie
 ![Download Subtitles](screenshots/subs.png)
 ![Download Everything](screenshots/download.png)
 ---
-[![Stargazers](https://reporoster.com/stars/dark/truelockmc/streambert)](https://github.com/truelockmc/streambert/stargazers)
+[![Stargazers](https://reporoster.com/stars/dark/Vhieer/streambert)](https://github.com/Vhieer/streambert/stargazers)
 ---
 ## Streaming
 The Application mainly gets Video Streams from VidSrc (you can also Stream from videasy.net and 2Embed). <br></br>
@@ -47,12 +50,12 @@ Once you click 'Download' these Links are used to download the Full Movie/TV Epi
 
 ## Anime
 You can also watch Anime, the App checks if a Movie or Series is an Anime and then sources its Metadata from [AniList](https://anilist.co/) instead of [tmdb](https://www.themoviedb.org/). <br></br>
-Media Files for Animes are scraped from AllManga.to (i stole this mechanic from [ani-cli](https://github.com/pystardust/ani-cli)). The App directly gets .mp4 Files and doesnt evem show you the AllManga website, you can also download these Files, just like any other Content.
+Media Files for Animes are scraped from AllManga.to first (mechanic inspired by [ani-cli](https://github.com/pystardust/ani-cli)). This fork also tries [AnimePahe](https://animepahe.pw/) as a fallback when AllManga/AllAnime has no result, no episode sources, or no playable link. The App directly gets playable `.mp4`/`.m3u8` streams and does not show you the provider website; you can also download these files, just like any other content.
 
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) (>=22.12.0) installed (only if you aren't using [prebuilt Binaries](https://github.com/truelockmc/streambert/releases/latest))
+- [Node.js](https://nodejs.org/) (>=22.12.0) installed (only if you aren't using [prebuilt Binaries](https://github.com/Vhieer/streambert/releases/latest))
 - A free TMDB API Read Access Token ([Guide on how to get one](tmdb-tutorial.md))
 - For downloading, [this Program](https://github.com/truelockmc/vid-dl-cli-only/releases/latest) somewhere on your PC and [ffmpeg](https://ffmpeg.org/download.html) installed
 
@@ -63,7 +66,7 @@ It's saved locally, you only need to do this once.
 
 ### Linux, Manual (.deb / .AppImage / .pacman)
 
-Download the latest `.deb` `.pacman` or `.AppImage` from the [Releases](https://github.com/truelockmc/streambert/releases/latest) page.
+Download the latest `.deb` `.pacman` or `.AppImage` from the [upstream Releases](https://github.com/truelockmc/streambert/releases/latest) page.
 ```bash
 # .deb
 sudo dpkg -i streambert_*.deb
@@ -77,7 +80,7 @@ chmod +x Streambert-x64.AppImage && ./Streambert-x64.AppImage
 
 ### Windows
 
-Download the latest `Streambert Setup *.exe` from the [Releases](https://github.com/truelockmc/streambert/releases/latest) page and run it.
+Download the latest `Streambert Setup *.exe` from this fork's [Releases](https://github.com/Vhieer/streambert/releases/latest) page and run it.
 
 ---
 
@@ -130,7 +133,7 @@ This application is provided "as is" for educational purposes. The developer:
 - Does not control third-party content providers
 - Encourages users to support content creators through legal means
 
-[![RepoStars](https://repostars.dev/api/embed?repo=truelockmc%2Fstreambert&theme=dark)](https://repostars.dev/?repos=truelockmc%2Fstreambert&theme=dark)
+[![RepoStars](https://repostars.dev/api/embed?repo=Vhieer%2Fstreambert&theme=dark)](https://repostars.dev/?repos=Vhieer%2Fstreambert&theme=dark)
 
 <details>
     <summary>Project Structure</summary>
