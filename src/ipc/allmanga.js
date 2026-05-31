@@ -3,7 +3,7 @@
 // Fix (from ani-cli PR #1632): use POST with JSON body instead of GET.
 // Clock/source endpoints are fetched with plain HTTPS (no CF protection).
 
-const { ipcMain } = require("electron");
+const { ipcMain, net, BrowserWindow } = require("electron");
 const https = require("https");
 const http = require("http");
 const crypto = require("crypto");
@@ -298,12 +298,56 @@ function resolveWithYtdlp(youtubeUrl) {
 }
 
 const ANIMEPAHE_BASES = ["https://animepahe.pw", "https://animepahe.org"];
-let _animepaheCookie = "";
+const _animepaheCookiesByHost = new Map();
 
-function mergeCookies(setCookie) {
-  if (!setCookie?.length) return;
+function animepaheHost(base) {
+  return new URL(base).hostname;
+}
+
+function animepaheCookieFor(base) {
+  return _animepaheCookiesByHost.get(animepaheHost(base)) || "";
+}
+
+function clearAnimepaheCookie(base) {
+  _animepaheCookiesByHost.delete(animepaheHost(base));
+}
+
+const animepaheSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let animepaheChallengePromise = null;
+
+async function solveAnimepaheChallenge(base) {
+  if (!BrowserWindow || !net?.fetch) return;
+  if (animepaheChallengePromise) return animepaheChallengePromise;
+  animepaheChallengePromise = (async () => {
+    const win = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 600,
+      webPreferences: { sandbox: true },
+    });
+    try {
+      win.webContents.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      );
+      await win.loadURL(base).catch(() => null);
+      for (let i = 0; i < 14; i++) {
+        const title = win.webContents.getTitle();
+        if (title && !/DDoS-Guard|Just a moment|Checking/i.test(title)) break;
+        await animepaheSleep(1000);
+      }
+    } finally {
+      if (!win.isDestroyed()) win.destroy();
+      animepaheChallengePromise = null;
+    }
+  })();
+  return animepaheChallengePromise;
+}
+
+function mergeCookies(setCookie, host) {
+  if (!setCookie?.length || !host) return;
+  const existing = _animepaheCookiesByHost.get(host) || "";
   const jar = new Map(
-    _animepaheCookie
+    existing
       .split(";")
       .map((p) => p.trim())
       .filter(Boolean)
@@ -315,9 +359,16 @@ function mergeCookies(setCookie) {
   for (const raw of setCookie) {
     const pair = raw.split(";")[0];
     const idx = pair.indexOf("=");
-    if (idx > 0) jar.set(pair.slice(0, idx), pair.slice(idx + 1));
+    if (idx <= 0) continue;
+    const name = pair.slice(0, idx);
+    // DDoS-Guard challenge cookies are only useful after JS solving. Carrying
+    // them from a blocked root request can make the JSON API return 403 even
+    // when the direct API endpoint is otherwise reachable.
+    if (/^__ddg/i.test(name)) continue;
+    jar.set(name, pair.slice(idx + 1));
   }
-  _animepaheCookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  if (cookie) _animepaheCookiesByHost.set(host, cookie);
 }
 
 function requestText(urlStr, headers = {}, timeout = 15000) {
@@ -333,7 +384,7 @@ function requestText(urlStr, headers = {}, timeout = 15000) {
           headers,
         },
         (res) => {
-          mergeCookies(res.headers["set-cookie"]);
+          mergeCookies(res.headers["set-cookie"], u.hostname);
           if (
             res.statusCode >= 300 &&
             res.statusCode < 400 &&
@@ -365,11 +416,38 @@ function requestText(urlStr, headers = {}, timeout = 15000) {
   });
 }
 
+async function requestTextWithElectron(urlStr, headers = {}, timeout = 15000) {
+  if (!net?.fetch) return requestText(urlStr, headers, timeout);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const fetchHeaders = { ...headers };
+    delete fetchHeaders.Cookie;
+    delete fetchHeaders.DNT;
+    delete fetchHeaders["Sec-Fetch-Dest"];
+    delete fetchHeaders["Sec-Fetch-Mode"];
+    delete fetchHeaders["Sec-Fetch-Site"];
+    const res = await net.fetch(urlStr, {
+      headers: fetchHeaders,
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const body = await res.text();
+    return { status: res.status, body, url: res.url || urlStr };
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("timeout");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function animepaheHeaders(base, referer = base) {
+  const cookie = animepaheCookieFor(base);
   return {
     Accept: "application/json, text/javascript, */*; q=0.01",
     "Accept-Language": "en-US,en;q=0.9",
-    Cookie: _animepaheCookie || "__ddg2_=;",
+    ...(cookie ? { Cookie: cookie } : {}),
     DNT: "1",
     Referer: referer,
     "Sec-Fetch-Dest": "empty",
@@ -382,14 +460,11 @@ function animepaheHeaders(base, referer = base) {
 }
 
 async function animepaheGet(base, path, referer) {
-  if (!_animepaheCookie) {
-    await requestText(base, animepaheHeaders(base), 15000).catch(() => null);
-  }
-  let res = await requestText(base + path, animepaheHeaders(base, referer), 18000);
+  let res = await requestTextWithElectron(base + path, animepaheHeaders(base, referer), 18000);
   if (res.status === 403 || /DDoS-Guard|Checking your browser/i.test(res.body)) {
-    _animepaheCookie = "";
-    await requestText(base, animepaheHeaders(base), 15000).catch(() => null);
-    res = await requestText(base + path, animepaheHeaders(base, referer), 18000);
+    clearAnimepaheCookie(base);
+    await solveAnimepaheChallenge(base);
+    res = await requestTextWithElectron(base + path, animepaheHeaders(base, referer), 18000);
   }
   return res;
 }
@@ -412,7 +487,7 @@ function unpackPacker(packedSource) {
 }
 
 async function extractKwikM3u8(url) {
-  const res = await requestText(
+  const res = await requestTextWithElectron(
     url,
     {
       Referer: "https://animepahe.pw/",
@@ -497,8 +572,11 @@ async function resolveAnimepahe(candidates, epStr, dubSub, isMovie) {
         }
         if (!episode) continue;
 
-        const playUrl = `${base}/play/${anime.session}/${episode.session}`;
-        const play = await requestText(playUrl, animepaheHeaders(base, `${base}/anime/${anime.session}`), 18000);
+        const play = await animepaheGet(
+          base,
+          `/play/${anime.session}/${episode.session}`,
+          `${base}/anime/${anime.session}`,
+        );
         if (play.status !== 200) {
           lastErrors.push(`${base} play HTTP ${play.status}`);
           continue;
