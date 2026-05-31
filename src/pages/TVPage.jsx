@@ -328,9 +328,14 @@ const INJECT_SKIP_CONTROLS = `
     window.__skipKeyCooldown = now + 250;
 
     if (e.code === 'Space') {
-      e.preventDefault(); // verhindert Scrollen
-      if (v.paused) v.play();
-      else v.pause();
+      const shouldPlay = v.paused;
+      e.preventDefault();
+      if (shouldPlay) {
+        const p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } else {
+        v.pause();
+      }
       show();
     }
 
@@ -719,9 +724,8 @@ export default function TVPage({
   }, [playing]);
 
   const webviewKey = useMemo(
-    () =>
-      `${playing}|${playerSource}|${resolvedPlayerUrl ?? ''}|${m3u8Url ?? ''}`,
-    [playing, playerSource, resolvedPlayerUrl, m3u8Url],
+    () => `${playing}|${playerSource}|${resolvedPlayerUrl ?? ''}`,
+    [playing, playerSource, resolvedPlayerUrl],
   );
 
   useEffect(() => {
