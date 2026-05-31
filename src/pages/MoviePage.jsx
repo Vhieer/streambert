@@ -333,6 +333,7 @@ export default function MoviePage({
                 if (!mounted) return;
                 setResolvedPlayerUrl(r.playerUrl);
                 setM3u8Url(res.url);
+                setWebviewLoading(false);
               })
               .catch(() => {
                 if (mounted) setResolveError("Failed to start local player");

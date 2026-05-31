@@ -688,6 +688,7 @@ export default function TVPage({
                 setResolvedPlayerUrl(r.playerUrl);
                 // Also expose raw url so download button can use it
                 setM3u8Url(res.url);
+                setWebviewLoading(false);
               })
               .catch(() => {
                 if (mounted) setResolveError("Failed to start local player");

@@ -1008,26 +1008,44 @@ let _currentVideoStartTime = 0;
 
 function buildPlayerHtml(videoUrl, startTime) {
   const isM3u8 = videoUrl.includes(".m3u8");
+  const proxiedVideoUrl = "/proxy?url=" + encodeURIComponent(videoUrl);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}.err{position:fixed;inset:0;display:none;place-items:center;padding:24px;color:#fca5a5;background:#050505;font:14px system-ui;text-align:center;white-space:pre-wrap}</style>
 </head><body>
-<video id="v" src="${isM3u8 ? "" : "/proxy?url=" + encodeURIComponent(videoUrl)}" autoplay controls playsinline crossorigin="anonymous"></video>
+<video id="v" src="${isM3u8 ? "" : proxiedVideoUrl}" autoplay controls playsinline crossorigin="anonymous"></video>
+<div id="err" class="err"></div>
 ${
   isM3u8
     ? `
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
 <script>
   const video=document.getElementById('v');
-  const src=decodeURIComponent("${encodeURIComponent(videoUrl)}");
+  const errorBox=document.getElementById('err');
+  const src="${proxiedVideoUrl}";
   const startTime=${startTime};
-  if(Hls.isSupported()){
-    const hls=new Hls({xhrSetup:(xhr)=>xhr.setRequestHeader('Referer','${_currentVideoReferer}')});
-    hls.loadSource(src);hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(startTime>0)video.currentTime=startTime;video.play().catch(()=>{});});
-  }else if(video.canPlayType('application/vnd.apple.mpegurl')){
+  function showError(message){
+    console.error(message);
+    errorBox.textContent='Video failed to load.\\n'+message;
+    errorBox.style.display='grid';
+  }
+  video.addEventListener('error',()=>{
+    const err=video.error;
+    showError(err ? (err.message || ('Media error code '+err.code)) : 'Unknown media error');
+  });
+  if(video.canPlayType('application/vnd.apple.mpegurl')){
     video.src=src;
     if(startTime>0)video.addEventListener('loadedmetadata',()=>{video.currentTime=startTime;},{once:true});
+    video.play().catch(()=>{});
+  }else if(window.Hls&&Hls.isSupported()){
+    const hls=new Hls({enableWorker:true, lowLatencyMode:false});
+    hls.loadSource(src);hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(startTime>0)video.currentTime=startTime;video.play().catch(()=>{});});
+    hls.on(Hls.Events.ERROR,(_event,data)=>{
+      if(data&&data.fatal) showError((data.type||'hls')+': '+(data.details||'fatal error'));
+    });
+  }else{
+    showError('HLS playback is not supported in this browser.');
   }
 </script>`
     : startTime > 0
@@ -1038,6 +1056,34 @@ ${
       : ""
 }
 </body></html>`;
+}
+
+function rewriteM3u8Playlist(body, baseUrl) {
+  return body
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+
+      if (trimmed.startsWith("#")) {
+        return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
+          try {
+            const absolute = new URL(uri, baseUrl).toString();
+            return `URI="/proxy?url=${encodeURIComponent(absolute)}"`;
+          } catch {
+            return _match;
+          }
+        });
+      }
+
+      try {
+        const absolute = new URL(trimmed, baseUrl).toString();
+        return "/proxy?url=" + encodeURIComponent(absolute);
+      } catch {
+        return line;
+      }
+    })
+    .join("\n");
 }
 
 function getPlayerServer() {
@@ -1083,8 +1129,6 @@ function getPlayerServer() {
             (proxyRes) => {
               const passHeaders = {};
               for (const h of [
-                "content-type",
-                "content-length",
                 "content-range",
                 "accept-ranges",
                 "last-modified",
@@ -1094,6 +1138,32 @@ function getPlayerServer() {
               }
               passHeaders["Access-Control-Allow-Origin"] = "*";
               passHeaders["Cache-Control"] = "no-store";
+
+              const contentType = proxyRes.headers["content-type"] || "";
+              const isPlaylist =
+                /mpegurl|m3u8/i.test(contentType) ||
+                /\.m3u8(\?|$)/i.test(targetUrl.pathname + targetUrl.search);
+
+              if (isPlaylist) {
+                let body = "";
+                proxyRes.setEncoding("utf8");
+                proxyRes.on("data", (chunk) => (body += chunk));
+                proxyRes.on("end", () => {
+                  const rewritten = rewriteM3u8Playlist(body, targetUrl.toString());
+                  const buffer = Buffer.from(rewritten, "utf8");
+                  res.writeHead(proxyRes.statusCode || 200, {
+                    ...passHeaders,
+                    "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+                    "Content-Length": buffer.length,
+                  });
+                  res.end(buffer);
+                });
+                return;
+              }
+
+              if (contentType) passHeaders["content-type"] = contentType;
+              if (proxyRes.headers["content-length"])
+                passHeaders["content-length"] = proxyRes.headers["content-length"];
               res.writeHead(proxyRes.statusCode, passHeaders);
               proxyRes.pipe(res);
             },
