@@ -9,7 +9,7 @@
 # Streambert
 A cross-platform Electron Desktop App to stream and download any Movie, TV Series or Anime in the World. Zero Ads and Tracking <br></br>
 
-This fork adds AnimePahe fallback support for anime playback when AllManga/AllAnime cannot find a title or playable episode source.
+This fork uses AnimePahe as the main anime playback source, with sub/dub and quality selection support. Auto quality prefers 1080p when AnimePahe provides it.
 
 ![Logo](public/logo.svg)
 [Installation](https://github.com/Vhieer/streambert?tab=readme-ov-file#requirements)
@@ -50,7 +50,7 @@ Once you click 'Download' these Links are used to download the Full Movie/TV Epi
 
 ## Anime
 You can also watch Anime, the App checks if a Movie or Series is an Anime and then sources its Metadata from [AniList](https://anilist.co/) instead of [tmdb](https://www.themoviedb.org/). <br></br>
-Media Files for Animes are scraped from AllManga.to first (mechanic inspired by [ani-cli](https://github.com/pystardust/ani-cli)). This fork also tries [AnimePahe](https://animepahe.pw/) as a fallback when AllManga/AllAnime has no result, no episode sources, or no playable link. The App directly gets playable `.mp4`/`.m3u8` streams and does not show you the provider website; you can also download these files, just like any other content.
+Media files for anime are scraped from [AnimePahe](https://animepahe.pw/). The app directly gets playable `.m3u8` streams and does not show you the provider website. Anime playback supports sub/dub switching and an AnimePahe quality control with Auto 1080p, 1080p, 720p, 480p, and 360p options; Auto picks 1080p when available and otherwise falls back to the best available stream. You can also download these files, just like any other content.
 
 
 ## Requirements

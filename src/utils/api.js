@@ -152,13 +152,13 @@ export const PLAYER_SOURCES = [
   },
   {
     id: "allmanga",
-    label: "AllManga + AnimePahe",
+    label: "AnimePahe",
     tag: "ANIME",
     note: null,
     supportsProgress: true,
     async: true,
-    movieUrl: (_id) => "https://allmanga.to",
-    tvUrl: (_id, _season, _ep) => "https://allmanga.to",
+    movieUrl: (_id) => "https://animepahe.pw",
+    tvUrl: (_id, _season, _ep) => "https://animepahe.pw",
   },
 ];
 

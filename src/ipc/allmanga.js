@@ -510,7 +510,38 @@ function decodeHtmlAttr(value) {
     .replace(/&#039;/g, "'");
 }
 
-async function resolveAnimepahe(candidates, epStr, dubSub, isMovie) {
+function normalizeAnimepaheQuality(qualityPreference) {
+  const value = String(qualityPreference || "auto").toLowerCase();
+  if (value === "auto") return "auto";
+  const numeric = parseInt(value, 10);
+  return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : "auto";
+}
+
+function selectAnimepaheLink(links, dubSub = "sub", qualityPreference = "auto") {
+  const normalizedQuality = normalizeAnimepaheQuality(qualityPreference);
+  const withResolution = links
+    .map((link) => ({ ...link, resolutionNum: parseInt(link.resolution, 10) || 0 }))
+    .filter((link) => link.url);
+  const preferredAudio = withResolution.filter((link) => {
+    const audio = String(link.audio || "").toLowerCase();
+    return dubSub === "dub" ? audio === "eng" : audio !== "eng";
+  });
+  const pool = preferredAudio.length ? preferredAudio : withResolution;
+  if (!pool.length) return null;
+
+  if (normalizedQuality !== "auto") {
+    const exact = pool.find((link) => String(link.resolutionNum) === normalizedQuality);
+    if (exact) return exact;
+  }
+
+  // Auto means prefer 1080p when available; otherwise use the highest quality.
+  return (
+    pool.find((link) => link.resolutionNum === 1080) ||
+    [...pool].sort((a, b) => b.resolutionNum - a.resolutionNum)[0]
+  );
+}
+
+async function resolveAnimepahe(candidates, epStr, dubSub, isMovie, qualityPreference = "auto") {
   const wantedEp = isMovie ? 1 : Number(epStr);
   const lastErrors = [];
 
@@ -593,18 +624,11 @@ async function resolveAnimepahe(candidates, epStr, dubSub, isMovie) {
             };
           })
           .filter((l) => l.url);
-        const sortedLinks = links.sort((a, b) => {
-          const audioScore = (l) => {
-            const audio = l.audio.toLowerCase();
-            if (dubSub === "dub") return audio === "eng" ? 0 : 1;
-            return audio === "eng" ? 1 : 0;
-          };
-          return (
-            audioScore(a) - audioScore(b) ||
-            (parseInt(b.resolution) || 0) - (parseInt(a.resolution) || 0)
-          );
-        });
-        for (const link of sortedLinks) {
+        const selectedLink = selectAnimepaheLink(links, dubSub, qualityPreference);
+        const fallbackLinks = links
+          .filter((link) => link !== selectedLink)
+          .sort((a, b) => (parseInt(b.resolution) || 0) - (parseInt(a.resolution) || 0));
+        for (const link of [selectedLink, ...fallbackLinks].filter(Boolean)) {
           const stream = await extractKwikM3u8(link.url).catch(() => null);
           if (stream) {
             return {
@@ -1113,48 +1137,14 @@ function register() {
     "resolve-allmanga",
     async (
       _,
-      { title, seasonNumber, episodeNumber, isMovie, translationType },
+      { title, seasonNumber, episodeNumber, isMovie, translationType, quality },
     ) => {
       try {
         const season = seasonNumber || 1;
         const dubSub = translationType === "dub" ? "dub" : "sub";
+        const qualityPreference = normalizeAnimepaheQuality(quality);
 
-        // 1. Check split season map
-        if (!isMovie) {
-          const splitParts = SPLIT_SEASONS[title.toLowerCase()]?.[season];
-          if (splitParts) {
-            let activePart = splitParts[0];
-            for (const part of splitParts) {
-              if (episodeNumber >= part.from) activePart = part;
-            }
-            const partEp = episodeNumber - activePart.offset;
-            if (activePart.showId) {
-              const result = await resolveEpisodeFromId(
-                activePart.showId,
-                String(partEp),
-                dubSub,
-              );
-              if (result) return result;
-            }
-          }
-        }
-
-        // 2. Check hardcoded show IDs
-        if (!isMovie) {
-          const hardcodedIds = HARDCODED_SHOW_IDS[title.toLowerCase()];
-          if (hardcodedIds) {
-            const showId =
-              hardcodedIds[season - 1] ?? hardcodedIds[hardcodedIds.length - 1];
-            const result = await resolveEpisodeFromId(
-              showId,
-              String(episodeNumber),
-              dubSub,
-            );
-            if (result) return result;
-          }
-        }
-
-        // 3. AniList season title lookup
+        // 1. AniList season title lookup
         const anilistResult = isMovie
           ? {
               title,
@@ -1196,91 +1186,19 @@ function register() {
         ]);
         const candidates = [...candidateSet].filter(Boolean);
 
-        // 5. Search AllManga
-        async function searchAllmanga(query) {
-          const vars = {
-            search: {
-              allowAdult: true,
-              allowUnknown: false,
-              query: query.toLowerCase(),
-            },
-            limit: 40,
-            page: 1,
-            translationType: dubSub,
-            countryOrigin: "ALL",
-          };
-          const res = await allanimeGQL(vars, SEARCH_GQL);
-          if (!res.body) return null;
-          try {
-            const edges = JSON.parse(res.body)?.data?.shows?.edges;
-            return edges?.length ? edges : null;
-          } catch {
-            return null;
-          }
-        }
-
-        let edges = null,
-          matchedTitle = searchTitle;
-        for (const candidate of candidates) {
-          try {
-            edges = await searchAllmanga(candidate);
-          } catch {
-            edges = null;
-          }
-          if (edges) {
-            matchedTitle = candidate;
-            break;
-          }
-        }
-        if (!edges) {
-          const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
-          if (pahe.ok) return pahe;
-          return {
-            ok: false,
-            error: "No results for: " + searchTitle + ". " + pahe.error,
-          };
-        }
-
-        const titleLower = matchedTitle.toLowerCase();
-        const anime =
-          edges.find((e) => (e.name || "").toLowerCase() === titleLower) ||
-          edges[0];
-
-        // 6. Get episode sourceUrls
-        const epCandidates = [epStr];
-        if (!epStr.includes(".")) epCandidates.push(epStr + ".0");
-
-        let sourceUrls = null;
-        for (const attempt of epCandidates) {
-          const epRes = await allanimeGQLEpisode({
-            showId: anime._id,
-            translationType: dubSub,
-            episodeString: attempt,
-          });
-          if (!epRes.body) continue;
-          const urls = parseEpisodeSourceUrls(epRes.body);
-          if (urls?.length) {
-            sourceUrls = urls;
-            break;
-          }
-        }
-        if (!sourceUrls?.length) {
-          const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
-          if (pahe.ok) return pahe;
-          return {
-            ok: false,
-            error: "No sourceUrls for ep " + epStr + ". " + pahe.error,
-          };
-        }
-
-        // 7. Decode and try each source
-        const result = await trySourceUrls(sourceUrls);
-        if (result) return { ...result, searchTitle };
-
-        const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
+        // 2. Resolve through AnimePahe only
+        const pahe = await resolveAnimepahe(
+          candidates,
+          epStr,
+          dubSub,
+          isMovie,
+          qualityPreference,
+        );
         if (pahe.ok) return pahe;
-
-        return { ok: false, error: "No playable link found. " + pahe.error };
+        return {
+          ok: false,
+          error: "AnimePahe could not find a playable link for: " + searchTitle + ". " + pahe.error,
+        };
       } catch (e) {
         return { ok: false, error: e.message };
       }
