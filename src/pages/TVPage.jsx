@@ -449,7 +449,6 @@ export default function TVPage({
     () => storage.get("downloaderFolder") || "",
   );
   const [epMenu, setEpMenu] = useState(null); // { x, y, pk }
-
   // Blocked request stats, reset key includes season+episode so counter resets on each ep
   const blockedResetKey = `${item.id}_s${selectedSeason}_e${selectedEp?.episode_number ?? 0}`;
   const {
@@ -710,6 +709,20 @@ export default function TVPage({
       mounted = false;
     };
   }, [playing, selectedEp, playerSource, selectedSeason, dubMode, animeQuality]);
+
+  useEffect(() => {
+    if (!playing) {
+      setResolvedPlayerUrl(null);
+      setM3u8Url(null);
+      setResolveError(null);
+    }
+  }, [playing]);
+
+  const webviewKey = useMemo(
+    () =>
+      `${playing}|${playerSource}|${resolvedPlayerUrl ?? ''}|${M3u8Url ?? ''}`,
+    [playing, playerSource, resolvedPlayerUrl, M3u8Url],
+  );
 
   useEffect(() => {
     if (!window.electron) return;
@@ -1681,6 +1694,7 @@ export default function TVPage({
                   </div>
                 )}
                 <webview
+                  key={webviewKey}
                   ref={webviewRef}
                   src={
                     pipOpen
