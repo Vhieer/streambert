@@ -682,7 +682,7 @@ export default function TVPage({
             setResolvedPlayerUrl(res.url);
           }
         } else {
-          setResolveError(res?.error || "Episode not found on AllManga");
+          setResolveError(res?.error || "Episode not found on anime sources");
         }
       })
       .catch((e) => {

@@ -152,7 +152,7 @@ export const PLAYER_SOURCES = [
   },
   {
     id: "allmanga",
-    label: "AllManga",
+    label: "AllManga + AnimePahe",
     tag: "ANIME",
     note: null,
     supportsProgress: true,

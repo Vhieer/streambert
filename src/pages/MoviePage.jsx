@@ -328,7 +328,7 @@ export default function MoviePage({
             setResolvedPlayerUrl(res.url);
           }
         } else {
-          setResolveError(res?.error || "Movie not found on AllManga");
+          setResolveError(res?.error || "Movie not found on anime sources");
         }
       })
       .catch((e) => {

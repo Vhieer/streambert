@@ -297,6 +297,262 @@ function resolveWithYtdlp(youtubeUrl) {
   });
 }
 
+const ANIMEPAHE_BASES = ["https://animepahe.pw", "https://animepahe.org"];
+let _animepaheCookie = "";
+
+function mergeCookies(setCookie) {
+  if (!setCookie?.length) return;
+  const jar = new Map(
+    _animepaheCookie
+      .split(";")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => {
+        const idx = p.indexOf("=");
+        return [p.slice(0, idx), p.slice(idx + 1)];
+      }),
+  );
+  for (const raw of setCookie) {
+    const pair = raw.split(";")[0];
+    const idx = pair.indexOf("=");
+    if (idx > 0) jar.set(pair.slice(0, idx), pair.slice(idx + 1));
+  }
+  _animepaheCookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+function requestText(urlStr, headers = {}, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const doReq = (url, hops = 0) => {
+      const u = new URL(url);
+      const lib = u.protocol === "https:" ? https : http;
+      const req = lib.request(
+        {
+          hostname: u.hostname,
+          path: u.pathname + u.search,
+          method: "GET",
+          headers,
+        },
+        (res) => {
+          mergeCookies(res.headers["set-cookie"]);
+          if (
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location &&
+            hops < 5
+          ) {
+            const loc = res.headers.location.startsWith("http")
+              ? res.headers.location
+              : new URL(res.headers.location, url).href;
+            res.resume();
+            doReq(loc, hops + 1);
+            return;
+          }
+          let data = "";
+          res.on("data", (c) => (data += c));
+          res.on("end", () =>
+            resolve({ status: res.statusCode, body: data, url }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(timeout, () => {
+        req.destroy();
+        reject(new Error("timeout"));
+      });
+      req.end();
+    };
+    doReq(urlStr);
+  });
+}
+
+function animepaheHeaders(base, referer = base) {
+  return {
+    Accept: "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    Cookie: _animepaheCookie || "__ddg2_=;",
+    DNT: "1",
+    Referer: referer,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "X-Requested-With": "XMLHttpRequest",
+  };
+}
+
+async function animepaheGet(base, path, referer) {
+  if (!_animepaheCookie) {
+    await requestText(base, animepaheHeaders(base), 15000).catch(() => null);
+  }
+  let res = await requestText(base + path, animepaheHeaders(base, referer), 18000);
+  if (res.status === 403 || /DDoS-Guard|Checking your browser/i.test(res.body)) {
+    _animepaheCookie = "";
+    await requestText(base, animepaheHeaders(base), 15000).catch(() => null);
+    res = await requestText(base + path, animepaheHeaders(base, referer), 18000);
+  }
+  return res;
+}
+
+function unpackPacker(packedSource) {
+  const match = /}\s*\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\.)*)'\./.exec(
+    packedSource,
+  );
+  if (!match) return null;
+  const [, payload, radixStr, countStr, keywordsStr] = match;
+  const radix = parseInt(radixStr, 10);
+  const count = parseInt(countStr, 10);
+  const keywords = keywordsStr.split("|");
+  const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const encode = (n) =>
+    n < radix ? chars[n] : encode(Math.floor(n / radix)) + chars[n % radix];
+  const dict = {};
+  for (let i = 0; i < count; i++) dict[encode(i)] = keywords[i] || encode(i);
+  return payload.replace(/\b\w+\b/g, (word) => dict[word] || word);
+}
+
+async function extractKwikM3u8(url) {
+  const res = await requestText(
+    url,
+    {
+      Referer: "https://animepahe.pw/",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      Accept: "text/html,*/*",
+    },
+    18000,
+  );
+  const packed = /;(eval)(\(f.*?)(?:\n<\/script>|<\/script>)/s.exec(res.body)?.[2];
+  const unpacked = packed ? unpackPacker(packed) : res.body;
+  const m3u8 = unpacked?.match(/https?:[^"'\\\s]+\.m3u8[^"'\\\s]*/i)?.[0];
+  return m3u8 ? m3u8.replace(/\\/g, "") : null;
+}
+
+function decodeHtmlAttr(value) {
+  return (value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'");
+}
+
+async function resolveAnimepahe(candidates, epStr, dubSub, isMovie) {
+  const wantedEp = isMovie ? 1 : Number(epStr);
+  const lastErrors = [];
+
+  for (const base of ANIMEPAHE_BASES) {
+    for (const candidate of candidates) {
+      try {
+        const search = await animepaheGet(
+          base,
+          `/api?m=search&q=${encodeURIComponent(candidate)}`,
+          base,
+        );
+        if (search.status !== 200) {
+          lastErrors.push(`${base} search HTTP ${search.status}`);
+          continue;
+        }
+        const data = JSON.parse(search.body)?.data || [];
+        if (!data.length) continue;
+        const needle = sanitizeTitle(candidate).toLowerCase();
+        const anime =
+          data.find((a) => sanitizeTitle(a.title || "").toLowerCase() === needle) ||
+          data[0];
+        if (!anime?.session) continue;
+
+        const firstPage = await animepaheGet(
+          base,
+          `/api?m=release&id=${encodeURIComponent(anime.session)}&sort=episode_asc&page=1`,
+          `${base}/anime/${anime.session}`,
+        );
+        if (firstPage.status !== 200) {
+          lastErrors.push(`${base} release HTTP ${firstPage.status}`);
+          continue;
+        }
+        const firstJson = JSON.parse(firstPage.body);
+        const lastPage = Math.max(1, Number(firstJson.last_page || 1));
+        const preferredPage = wantedEp ? Math.ceil(wantedEp / 8) : 1;
+        const pages = [
+          1,
+          preferredPage - 1,
+          preferredPage,
+          preferredPage + 1,
+          lastPage,
+        ].filter((p, i, arr) => p >= 1 && p <= lastPage && arr.indexOf(p) === i);
+
+        let episode = (firstJson.data || []).find(
+          (e) => Number(e.episode) === wantedEp,
+        );
+        for (const page of pages) {
+          if (episode || page === 1) continue;
+          const pageRes = await animepaheGet(
+            base,
+            `/api?m=release&id=${encodeURIComponent(anime.session)}&sort=episode_asc&page=${page}`,
+            `${base}/anime/${anime.session}`,
+          );
+          if (pageRes.status !== 200) continue;
+          const pageJson = JSON.parse(pageRes.body);
+          episode = (pageJson.data || []).find(
+            (e) => Number(e.episode) === wantedEp,
+          );
+        }
+        if (!episode) continue;
+
+        const playUrl = `${base}/play/${anime.session}/${episode.session}`;
+        const play = await requestText(playUrl, animepaheHeaders(base, `${base}/anime/${anime.session}`), 18000);
+        if (play.status !== 200) {
+          lastErrors.push(`${base} play HTTP ${play.status}`);
+          continue;
+        }
+        const links = [...play.body.matchAll(/<button[^>]+data-src=["']([^"']+)["'][^>]*>/gi)]
+          .map((m) => {
+            const tag = m[0];
+            return {
+              url: decodeHtmlAttr(m[1]),
+              audio: /data-audio=["']([^"']+)["']/i.exec(tag)?.[1] || "",
+              resolution:
+                /data-resolution=["']([^"']+)["']/i.exec(tag)?.[1] ||
+                tag.replace(/<[^>]+>/g, "").trim(),
+            };
+          })
+          .filter((l) => l.url);
+        const sortedLinks = links.sort((a, b) => {
+          const audioScore = (l) => {
+            const audio = l.audio.toLowerCase();
+            if (dubSub === "dub") return audio === "eng" ? 0 : 1;
+            return audio === "eng" ? 1 : 0;
+          };
+          return (
+            audioScore(a) - audioScore(b) ||
+            (parseInt(b.resolution) || 0) - (parseInt(a.resolution) || 0)
+          );
+        });
+        for (const link of sortedLinks) {
+          const stream = await extractKwikM3u8(link.url).catch(() => null);
+          if (stream) {
+            return {
+              ok: true,
+              url: stream,
+              resolution: link.resolution || "?",
+              sourceName: "AnimePahe",
+              isDirectMp4: false,
+              referer: "https://kwik.cx/",
+              searchTitle: anime.title,
+            };
+          }
+        }
+      } catch (e) {
+        lastErrors.push(e.message);
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: lastErrors.length
+      ? `AnimePahe fallback failed: ${lastErrors.at(-1)}`
+      : "AnimePahe fallback found no matching episode",
+  };
+}
+
 function allanimeGQL(variables, query) {
   const body = JSON.stringify({ variables, query });
   return new Promise((resolve, reject) => {
@@ -888,14 +1144,24 @@ function register() {
         let edges = null,
           matchedTitle = searchTitle;
         for (const candidate of candidates) {
-          edges = await searchAllmanga(candidate);
+          try {
+            edges = await searchAllmanga(candidate);
+          } catch {
+            edges = null;
+          }
           if (edges) {
             matchedTitle = candidate;
             break;
           }
         }
-        if (!edges)
-          return { ok: false, error: "No results for: " + searchTitle };
+        if (!edges) {
+          const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
+          if (pahe.ok) return pahe;
+          return {
+            ok: false,
+            error: "No results for: " + searchTitle + ". " + pahe.error,
+          };
+        }
 
         const titleLower = matchedTitle.toLowerCase();
         const anime =
@@ -920,14 +1186,23 @@ function register() {
             break;
           }
         }
-        if (!sourceUrls?.length)
-          return { ok: false, error: "No sourceUrls for ep " + epStr };
+        if (!sourceUrls?.length) {
+          const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
+          if (pahe.ok) return pahe;
+          return {
+            ok: false,
+            error: "No sourceUrls for ep " + epStr + ". " + pahe.error,
+          };
+        }
 
         // 7. Decode and try each source
         const result = await trySourceUrls(sourceUrls);
         if (result) return { ...result, searchTitle };
 
-        return { ok: false, error: "No playable link found" };
+        const pahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
+        if (pahe.ok) return pahe;
+
+        return { ok: false, error: "No playable link found. " + pahe.error };
       } catch (e) {
         return { ok: false, error: e.message };
       }
