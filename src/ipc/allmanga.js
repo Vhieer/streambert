@@ -1036,6 +1036,36 @@ ${
     const p=video.play();
     if(p&&typeof p.catch==='function') p.catch(()=>{});
   }
+  function tryResumeWhenReady(){
+    if(video.readyState >= 2){
+      tryResume();
+      return;
+    }
+    const once = () => {
+      video.removeEventListener('canplay', once);
+      video.removeEventListener('loadeddata', once);
+      tryResume();
+    };
+    video.addEventListener('canplay', once, { once:true });
+    video.addEventListener('loadeddata', once, { once:true });
+  }
+
+  let wasPlayingBeforeSeek = false;
+  video.addEventListener('seeking', () => {
+    wasPlayingBeforeSeek = !video.paused;
+  });
+  video.addEventListener('seeked', () => {
+    if (wasPlayingBeforeSeek || !video.ended) {
+      tryResumeWhenReady();
+    }
+    wasPlayingBeforeSeek = false;
+  });
+  video.addEventListener('stalled', () => {
+    if (!video.paused) tryResumeWhenReady();
+  });
+  video.addEventListener('waiting', () => {
+    if (!video.paused) tryResumeWhenReady();
+  });
 
   video.addEventListener('playing', clearError);
   video.addEventListener('error',()=>{
