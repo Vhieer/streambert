@@ -340,12 +340,22 @@ const INJECT_SKIP_CONTROLS = `
     }
 
     if (e.key === 'ArrowLeft') {
+      const wasPlaying = !v.paused;
       v.currentTime = Math.max(0, v.currentTime - 10);
+      if (wasPlaying) {
+        const p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
       show();
     }
 
     if (e.key === 'ArrowRight') {
+      const wasPlaying = !v.paused;
       v.currentTime = Math.min(v.duration || 0, v.currentTime + 10);
+      if (wasPlaying) {
+        const p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
       show();
     }
   }, true);
