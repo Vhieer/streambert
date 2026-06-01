@@ -1348,33 +1348,9 @@ export default function TVPage({
     } catch {}
   }, []);
 
-  useEffect(() => {
-    const wv = webviewRef.current;
-    if (!wv || !playing || playerSource !== "allmanga") return;
-
-    const inject = () => {
-      wv.executeJavaScript(INJECT_SKIP_CONTROLS).catch(() => {});
-    };
-
-    wv.addEventListener("dom-ready", inject);
-
-    try {
-      inject();
-    } catch {}
-
-    return () => {
-      wv.removeEventListener("dom-ready", inject);
-      try {
-        wv.executeJavaScript(`
-          (() => {
-            const el = document.getElementById('__skip-ui');
-            if (el) el.remove();
-            window.__skipControlsInjected = false;
-          })()
-        `);
-      } catch {}
-    };
-  }, [playing, playerSource]);
+  // Intentionally disable custom injected skip controls for AnimePahe webview.
+  // We keep native video controls only (same behavior style as MoviePage),
+  // because injected keyboard handlers can desync play/pause after seek.
 
   const playEpisode = useCallback(
     (ep) => {
