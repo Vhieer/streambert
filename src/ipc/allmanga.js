@@ -1033,16 +1033,42 @@ ${
     const err=video.error;
     showError(err ? (err.message || ('Media error code '+err.code)) : 'Unknown media error');
   });
+  function tryResume(){
+    const p=video.play();
+    if(p&&typeof p.catch==='function') p.catch(()=>{});
+  }
+  video.addEventListener('playing',()=>{ errorBox.style.display='none'; });
+  video.addEventListener('seeked',()=>{
+    if(!video.paused) tryResume();
+  });
+
   if(video.canPlayType('application/vnd.apple.mpegurl')){
     video.src=src;
     if(startTime>0)video.addEventListener('loadedmetadata',()=>{video.currentTime=startTime;},{once:true});
-    video.play().catch(()=>{});
+    tryResume();
   }else if(window.Hls&&Hls.isSupported()){
-    const hls=new Hls({enableWorker:true, lowLatencyMode:false});
+    let recoveringMedia=false;
+    let lastRecoverTs=0;
+    const hls=new Hls({enableWorker:true, lowLatencyMode:false,maxBufferLength:30,maxMaxBufferLength:60});
     hls.loadSource(src);hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(startTime>0)video.currentTime=startTime;video.play().catch(()=>{});});
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(startTime>0)video.currentTime=startTime;tryResume();});
     hls.on(Hls.Events.ERROR,(_event,data)=>{
-      if(data&&data.fatal) showError((data.type||'hls')+': '+(data.details||'fatal error'));
+      if(!data||!data.fatal) return;
+      const now=Date.now();
+      if(data.type===Hls.ErrorTypes.NETWORK_ERROR){
+        hls.startLoad();
+        return;
+      }
+      if(data.type===Hls.ErrorTypes.MEDIA_ERROR){
+        if(!recoveringMedia || (now-lastRecoverTs)>3000){
+          recoveringMedia=true;
+          lastRecoverTs=now;
+          hls.recoverMediaError();
+          setTimeout(()=>{ recoveringMedia=false; tryResume(); },400);
+          return;
+        }
+      }
+      showError((data.type||'hls')+': '+(data.details||'fatal error'));
     });
   }else{
     showError('HLS playback is not supported in this browser.');
