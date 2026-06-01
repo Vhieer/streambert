@@ -1018,61 +1018,92 @@ function buildPlayerHtml(videoUrl, startTime) {
 ${
   isM3u8
     ? `
+<script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.14.6/shaka-player.compiled.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
 <script>
   const video=document.getElementById('v');
   const errorBox=document.getElementById('err');
   const src="${proxiedVideoUrl}";
   const startTime=${startTime};
+
   function showError(message){
     console.error(message);
     errorBox.textContent='Video failed to load.\\n'+message;
     errorBox.style.display='grid';
   }
-  video.addEventListener('error',()=>{
-    const err=video.error;
-    showError(err ? (err.message || ('Media error code '+err.code)) : 'Unknown media error');
-  });
+  function clearError(){ errorBox.style.display='none'; }
   function tryResume(){
     const p=video.play();
     if(p&&typeof p.catch==='function') p.catch(()=>{});
   }
-  video.addEventListener('playing',()=>{ errorBox.style.display='none'; });
-  video.addEventListener('seeked',()=>{
-    if(!video.paused) tryResume();
+
+  video.addEventListener('playing', clearError);
+  video.addEventListener('error',()=>{
+    const err=video.error;
+    showError(err ? (err.message || ('Media error code '+err.code)) : 'Unknown media error');
   });
 
-  if(video.canPlayType('application/vnd.apple.mpegurl')){
+  async function bootWithShaka(){
+    if(!window.shaka || !window.shaka.Player) return false;
+    if(!shaka.Player.isBrowserSupported()) return false;
+    const player = new shaka.Player(video);
+    player.configure({
+      streaming: {
+        rebufferingGoal: 2,
+        bufferingGoal: 20,
+        retryParameters: { maxAttempts: 6, baseDelay: 300, backoffFactor: 2, fuzzFactor: 0.5 }
+      }
+    });
+    player.addEventListener('error', (event) => {
+      const detail = event && event.detail ? event.detail : null;
+      const msg = detail ? ('shaka '+(detail.code||'error')) : 'shaka unknown error';
+      showError(msg);
+    });
+    await player.load(src);
+    if(startTime>0){ try{ video.currentTime=startTime; }catch{} }
+    tryResume();
+    window.__streambertPlayer = player;
+    return true;
+  }
+
+  function bootWithNative(){
     video.src=src;
     if(startTime>0)video.addEventListener('loadedmetadata',()=>{video.currentTime=startTime;},{once:true});
     tryResume();
-  }else if(window.Hls&&Hls.isSupported()){
-    let recoveringMedia=false;
-    let lastRecoverTs=0;
-    const hls=new Hls({enableWorker:true, lowLatencyMode:false,maxBufferLength:30,maxMaxBufferLength:60});
-    hls.loadSource(src);hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(startTime>0)video.currentTime=startTime;tryResume();});
+  }
+
+  function bootWithHlsJs(){
+    if(!(window.Hls&&Hls.isSupported())) return false;
+    const hls = new Hls({enableWorker:true, lowLatencyMode:false, maxBufferLength:30, maxMaxBufferLength:60});
+    hls.loadSource(src);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{
+      if(startTime>0) video.currentTime=startTime;
+      tryResume();
+    });
     hls.on(Hls.Events.ERROR,(_event,data)=>{
       if(!data||!data.fatal) return;
-      const now=Date.now();
-      if(data.type===Hls.ErrorTypes.NETWORK_ERROR){
-        hls.startLoad();
-        return;
-      }
-      if(data.type===Hls.ErrorTypes.MEDIA_ERROR){
-        if(!recoveringMedia || (now-lastRecoverTs)>3000){
-          recoveringMedia=true;
-          lastRecoverTs=now;
-          hls.recoverMediaError();
-          setTimeout(()=>{ recoveringMedia=false; tryResume(); },400);
-          return;
-        }
-      }
+      if(data.type===Hls.ErrorTypes.NETWORK_ERROR){ hls.startLoad(); return; }
+      if(data.type===Hls.ErrorTypes.MEDIA_ERROR){ hls.recoverMediaError(); setTimeout(tryResume,350); return; }
       showError((data.type||'hls')+': '+(data.details||'fatal error'));
     });
-  }else{
-    showError('HLS playback is not supported in this browser.');
+    window.__streambertPlayer = hls;
+    return true;
   }
+
+  (async()=>{
+    clearError();
+    try {
+      if(video.canPlayType('application/vnd.apple.mpegurl')){ bootWithNative(); return; }
+      const shakaOk = await bootWithShaka();
+      if(shakaOk) return;
+      const hlsOk = bootWithHlsJs();
+      if(hlsOk) return;
+      showError('HLS playback is not supported in this browser.');
+    } catch (e) {
+      showError(e?.message || 'Player bootstrap failed');
+    }
+  })();
 </script>`
     : startTime > 0
       ? `<script>
