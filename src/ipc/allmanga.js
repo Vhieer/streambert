@@ -1110,15 +1110,31 @@ let _playerServer = null;
 let _currentVideoUrl = null;
 let _currentVideoReferer = "https://allmanga.to";
 let _currentVideoStartTime = 0;
+let _currentVideoIsDirectMp4 = false;
 
-function buildPlayerHtml(videoUrl, startTime) {
+function buildPlayerHtml(videoUrl, startTime, isDirectMp4 = false) {
   const isM3u8 = videoUrl.includes(".m3u8");
+  // For direct MP4, bypass proxy entirely - set src directly for fastest start
   const proxiedVideoUrl = "/proxy?url=" + encodeURIComponent(videoUrl);
+  const videoSrc = isDirectMp4 ? videoUrl : (isM3u8 ? "" : proxiedVideoUrl);
+  const referrerPolicy = isDirectMp4 ? "no-referrer" : "origin";
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}.err{position:fixed;inset:0;display:none;place-items:center;padding:24px;color:#fca5a5;background:#050505;font:14px system-ui;text-align:center;white-space:pre-wrap}</style>
+<!-- Preconnect to CDN origins for faster script loads -->
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+video{width:100%;height:100%;object-fit:contain;display:block}
+.err{position:fixed;inset:0;display:none;place-items:center;padding:24px;color:#fca5a5;background:#050505;font:14px system-ui;text-align:center;white-space:pre-wrap}
+.loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:10;color:#666;font:13px system-ui}
+.loader::after{content:'';width:28px;height:28px;border:3px solid #333;border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;margin-left:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
 </head><body>
-<video id="v" src="${isM3u8 ? "" : proxiedVideoUrl}" autoplay controls playsinline crossorigin="anonymous"></video>
+<div id="loader" class="loader">Loading video…</div>
+<video id="v" src="${videoSrc}" autoplay controls playsinline crossorigin="${referrerPolicy}"></video>
 <div id="err" class="err"></div>
 ${
   isM3u8
@@ -1128,6 +1144,7 @@ ${
 <script>
   const video=document.getElementById('v');
   const errorBox=document.getElementById('err');
+  const loader=document.getElementById('loader');
   const src="${proxiedVideoUrl}";
   const startTime=${startTime};
 
@@ -1135,43 +1152,38 @@ ${
     console.error(message);
     errorBox.textContent='Video failed to load.\\n'+message;
     errorBox.style.display='grid';
+    if(loader) loader.style.display='none';
   }
-  function clearError(){ errorBox.style.display='none'; }
+  function clearError(){
+    errorBox.style.display='none';
+    if(loader) loader.style.display='none';
+  }
+  function hideLoader(){ if(loader) loader.style.display='none'; }
   function tryResume(){
     const p=video.play();
     if(p&&typeof p.catch==='function') p.catch(()=>{});
   }
   function tryResumeWhenReady(){
     if(video.readyState >= 2){
-      tryResume();
-      return;
+      tryResume(); hideLoader(); return;
     }
     const once = () => {
       video.removeEventListener('canplay', once);
       video.removeEventListener('loadeddata', once);
-      tryResume();
+      tryResume(); hideLoader();
     };
     video.addEventListener('canplay', once, { once:true });
     video.addEventListener('loadeddata', once, { once:true });
   }
 
   let wasPlayingBeforeSeek = false;
-  video.addEventListener('seeking', () => {
-    wasPlayingBeforeSeek = !video.paused;
-  });
+  video.addEventListener('seeking', () => { wasPlayingBeforeSeek = !video.paused; });
   video.addEventListener('seeked', () => {
-    if (wasPlayingBeforeSeek || !video.ended) {
-      tryResumeWhenReady();
-    }
+    if (wasPlayingBeforeSeek || !video.ended) { tryResumeWhenReady(); }
     wasPlayingBeforeSeek = false;
   });
-  video.addEventListener('stalled', () => {
-    if (!video.paused) tryResumeWhenReady();
-  });
-  video.addEventListener('waiting', () => {
-    if (!video.paused) tryResumeWhenReady();
-  });
-
+  video.addEventListener('stalled', () => { if (!video.paused) tryResumeWhenReady(); });
+  video.addEventListener('waiting', () => { if (!video.paused) tryResumeWhenReady(); });
   video.addEventListener('playing', clearError);
   video.addEventListener('error',()=>{
     const err=video.error;
@@ -1196,15 +1208,15 @@ ${
     });
     await player.load(src);
     if(startTime>0){ try{ video.currentTime=startTime; }catch{} }
-    tryResume();
+    tryResume(); hideLoader();
     window.__streambertPlayer = player;
     return true;
   }
 
   function bootWithNative(){
     video.src=src;
-    if(startTime>0)video.addEventListener('loadedmetadata',()=>{video.currentTime=startTime;},{once:true});
-    tryResume();
+    if(startTime>0) video.addEventListener('loadedmetadata',()=>{video.currentTime=startTime;},{once:true});
+    tryResume(); hideLoader();
   }
 
   function bootWithHlsJs(){
@@ -1214,7 +1226,7 @@ ${
     hls.attachMedia(video);
     hls.on(Hls.Events.MANIFEST_PARSED,()=>{
       if(startTime>0) video.currentTime=startTime;
-      tryResume();
+      tryResume(); hideLoader();
     });
     hls.on(Hls.Events.ERROR,(_event,data)=>{
       if(!data||!data.fatal) return;
@@ -1229,7 +1241,10 @@ ${
   (async()=>{
     clearError();
     try {
-      if(video.canPlayType('application/vnd.apple.mpegurl')){ bootWithNative(); return; }
+      // Try native HLS first (Safari, Edge) - no extra JS load needed
+      if(video.canPlayType('application/vnd.apple.mpegurl')){
+        bootWithNative(); return;
+      }
       const shakaOk = await bootWithShaka();
       if(shakaOk) return;
       const hlsOk = bootWithHlsJs();
@@ -1244,8 +1259,9 @@ ${
       ? `<script>
   const v=document.getElementById('v');
   v.addEventListener('loadedmetadata',()=>{v.currentTime=${startTime};},{once:true});
+  document.getElementById('loader')?.style.display='none';
 </script>`
-      : ""
+      : `<script>document.getElementById('loader')?.style.display='none';</script>`
 }
 </body></html>`;
 }
@@ -1290,7 +1306,7 @@ function getPlayerServer() {
           "Cache-Control": "no-store",
         });
         res.end(
-          buildPlayerHtml(_currentVideoUrl || "", _currentVideoStartTime || 0),
+          buildPlayerHtml(_currentVideoUrl || "", _currentVideoStartTime || 0, _currentVideoIsDirectMp4),
         );
         return;
       }
@@ -1387,10 +1403,11 @@ function getPlayerServer() {
 // ── IPC registration ──────────────────────────────────────────────────────────
 
 function register() {
-  ipcMain.handle("set-player-video", async (_, { url, referer, startTime }) => {
+  ipcMain.handle("set-player-video", async (_, { url, referer, startTime, isDirectMp4 }) => {
     _currentVideoUrl = url;
     _currentVideoReferer = referer || "https://allmanga.to";
     _currentVideoStartTime = startTime || 0;
+    _currentVideoIsDirectMp4 = !!isDirectMp4;
     const server = await getPlayerServer();
     return { playerUrl: `http://127.0.0.1:${server.address().port}/player` };
   });
