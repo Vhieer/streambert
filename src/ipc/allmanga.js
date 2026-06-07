@@ -129,10 +129,19 @@ function decodeTobeparsed(blob) {
       decipher.update(ct),
       decipher.final(),
     ]).toString("utf8");
-    // Extract sourceUrl / sourceName pairs from the decrypted JSON blob
+    // Prefer structured JSON parsing so iframe fallbacks (Ok/Mp4/Ss-Hls/etc.)
+    // survive AllAnime's encrypted response format. The old regex only kept
+    // encoded clock URLs and dropped usable iframe sources.
+    try {
+      const json = JSON.parse(plain);
+      const sourceUrls = json?.episode?.sourceUrls;
+      if (sourceUrls?.length) return sourceUrls;
+    } catch {}
+
+    // Fallback for malformed decrypted payloads.
     const sources = [];
     for (const chunk of plain.split(/[{}]/)) {
-      const urlMatch = chunk.match(/"sourceUrl"\s*:\s*"(--[^"]+)"/);
+      const urlMatch = chunk.match(/"sourceUrl"\s*:\s*"([^"]+)"/);
       const nameMatch = chunk.match(/"sourceName"\s*:\s*"([^"]+)"/);
       const prioMatch = chunk.match(/"priority"\s*:\s*([0-9.]+)/);
       if (urlMatch) {
@@ -895,6 +904,84 @@ async function resolveEpisodeFromId(showId, epStr, dubSub) {
   return trySourceUrls(sourceUrls);
 }
 
+function normalizeForProviderMatch(value) {
+  return sanitizeTitle(value || "")
+    .toLowerCase()
+    .replace(/\b(tv special|special|ova|ona|movie)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pickAllanimeShow(edges, candidate, wantedEp, dubSub) {
+  const normalizedCandidate = normalizeForProviderMatch(candidate);
+  const withMeta = (edges || []).map((edge) => {
+    const available = Number(edge?.availableEpisodes?.[dubSub] || 0);
+    const normalizedName = normalizeForProviderMatch(edge?.name || "");
+    const exact = normalizedName === normalizedCandidate;
+    const contains =
+      normalizedName.includes(normalizedCandidate) ||
+      normalizedCandidate.includes(normalizedName);
+    const isSpecial = /\b(tv special|special|ova|ona|movie)\b/i.test(edge?.name || "");
+    return { edge, available, exact, contains, isSpecial };
+  });
+
+  return (
+    withMeta
+      .filter((item) => item.edge?._id)
+      .filter((item) => !wantedEp || !item.available || item.available >= wantedEp)
+      .sort((a, b) => {
+        if (a.exact !== b.exact) return a.exact ? -1 : 1;
+        if (a.contains !== b.contains) return a.contains ? -1 : 1;
+        if (a.isSpecial !== b.isSpecial) return a.isSpecial ? 1 : -1;
+        return b.available - a.available;
+      })[0]?.edge || null
+  );
+}
+
+async function resolveAllanimeFallback(candidates, epStr, dubSub) {
+  const wantedEp = Number(epStr) || 1;
+  const lastErrors = [];
+
+  for (const candidate of candidates) {
+    try {
+      const variables = {
+        search: { query: candidate, allowAdult: false, allowUnknown: false },
+        limit: 10,
+        page: 1,
+        translationType: dubSub,
+        countryOrigin: "ALL",
+      };
+      const res = await allanimeGQL(variables, SEARCH_GQL);
+      if (res.status !== 200) {
+        lastErrors.push(`AllAnime search HTTP ${res.status}`);
+        continue;
+      }
+      const edges = JSON.parse(res.body)?.data?.shows?.edges || [];
+      const show = pickAllanimeShow(edges, candidate, wantedEp, dubSub);
+      if (!show?._id) continue;
+
+      const stream = await resolveEpisodeFromId(show._id, epStr, dubSub);
+      if (stream?.ok) {
+        return {
+          ...stream,
+          sourceName: `${stream.sourceName || "AllAnime"} (AllAnime fallback)`,
+          searchTitle: show.name,
+        };
+      }
+      lastErrors.push(`AllAnime found ${show.name} but episode ${epStr} has no playable source`);
+    } catch (e) {
+      lastErrors.push(e.message);
+    }
+  }
+
+  return {
+    ok: false,
+    error: lastErrors.length
+      ? `AllAnime fallback failed: ${lastErrors.at(-1)}`
+      : "AllAnime fallback found no matching episode",
+  };
+}
+
 async function trySourceUrls(sourceUrls) {
   const decodedSources = sourceUrls
     .filter((s) => s.sourceUrl?.startsWith("--"))
@@ -908,6 +995,10 @@ async function trySourceUrls(sourceUrls) {
       const bi = PROVIDER_PRIORITY.indexOf(b.sourceName);
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
+
+  const iframeSources = sourceUrls
+    .filter((s) => /^https?:\/\//i.test(s.sourceUrl || ""))
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0));
 
   for (const src of decodedSources) {
     let fetchUrl = src.path;
@@ -996,6 +1087,20 @@ async function trySourceUrls(sourceUrls) {
       continue;
     }
   }
+  for (const src of iframeSources) {
+    const directLike =
+      /\.(mp4|webm|mkv|m3u8)(\?|$)/i.test(src.sourceUrl) ||
+      /fast4speed\.rsvp|googlevideo\.com/i.test(src.sourceUrl);
+    return {
+      ok: true,
+      url: src.sourceUrl,
+      resolution: "?",
+      sourceName: src.sourceName || "AllAnime iframe",
+      ...(directLike ? { isDirectMp4: !src.sourceUrl.includes(".m3u8") } : {}),
+      referer: "https://allmanga.to",
+    };
+  }
+
   return null;
 }
 
@@ -1345,9 +1450,22 @@ function register() {
         // 2. Resolve through AnimePahe/Kwik and keep the current local HLS player.
         const animepahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
         if (animepahe.ok) return animepahe;
+
+        // AnimePahe's API can be Cloudflare-challenged (HTTP 403) even when the
+        // show exists. Keep playback working by falling back to the existing
+        // AllAnime resolver instead of surfacing a false "episode not found".
+        const allanimeFallback = await resolveAllanimeFallback(candidates, epStr, dubSub);
+        if (allanimeFallback.ok) return allanimeFallback;
+
         return {
           ok: false,
-          error: "AnimePahe could not find a playable link for: " + searchTitle + ". " + animepahe.error,
+          error:
+            "AnimePahe could not find a playable link for: " +
+            searchTitle +
+            ". " +
+            animepahe.error +
+            ". " +
+            allanimeFallback.error,
         };
       } catch (e) {
         return { ok: false, error: e.message };
