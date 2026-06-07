@@ -152,13 +152,13 @@ export const PLAYER_SOURCES = [
   },
   {
     id: "allmanga",
-    label: "Zoroto",
+    label: "AnimePahe",
     tag: "ANIME",
     note: null,
     supportsProgress: true,
     async: true,
-    movieUrl: (_id) => "https://www.zoroto.se",
-    tvUrl: (_id, _season, _ep) => "https://www.zoroto.se",
+    movieUrl: (_id) => "https://animepahe.pw",
+    tvUrl: (_id, _season, _ep) => "https://animepahe.pw",
   },
 ];
 

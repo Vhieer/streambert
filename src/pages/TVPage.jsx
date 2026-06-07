@@ -656,7 +656,7 @@ export default function TVPage({
     };
   }, [item.id, isAnime]);
 
-  // Resolve Zoroto episode URL via main-process IPC (GraphQL, no CORS)
+  // Resolve AnimePahe episode URL via main-process IPC and load it in the local HLS player.
   useEffect(() => {
     if (!playing || !selectedEp || !isAsync) return;
     if (resolvedPlayerUrl || resolvingUrl) return;
@@ -775,7 +775,7 @@ export default function TVPage({
     [d.seasons],
   );
   // tmdbSeasonsWithSpecials includes season 0 for display purposes.
-  // Excluded for anime: Zoroto
+  // Excluded for anime: AnimePahe
   const tmdbSeasonsWithSpecials = useMemo(() => {
     if (isAnime) return tmdbSeasons;
     if (failedSeasons.has(0)) return tmdbSeasons;
@@ -1334,7 +1334,7 @@ export default function TVPage({
     } catch {}
   }, []);
 
-  // Intentionally disable custom injected skip controls for Zoroto webview.
+  // Intentionally disable custom injected skip controls for the anime webview.
   // We keep native video controls only (same behavior style as MoviePage),
   // because injected keyboard handlers can desync play/pause after seek.
 
@@ -1366,7 +1366,7 @@ export default function TVPage({
 
   // Intercept fullscreen requests from embedded players (vidsrc / 2embed use
   // the native Fullscreen API which would otherwise fullscreen the entire app).
-  // Videasy and Zoroto handle fullscreen internally via CSS, skip those.
+  // Videasy and anime HLS player handle fullscreen internally via CSS, skip those.
   useEffect(() => {
     if (!playing) return;
     if (!NEEDS_INTERCEPT.includes(playerSource)) return;
@@ -1591,7 +1591,7 @@ export default function TVPage({
                     <div className="spinner" />
                     <span style={{ fontSize: 14, color: "var(--text2)" }}>
                       {resolvingUrl
-                        ? "Looking up episode on Zoroto…"
+                        ? "Looking up episode on AnimePahe…"
                         : `Loading ${PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ?? "source"}…`}
                     </span>
                   </div>
@@ -1614,7 +1614,7 @@ export default function TVPage({
                   >
                     <span style={{ fontSize: 28 }}>⚠️</span>
                     <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                      Episode not found on Zoroto
+                      Episode not found on AnimePahe
                     </span>
                     <span style={{ fontSize: 12, color: "var(--text3)" }}>
                       {resolveError}
@@ -1721,7 +1721,7 @@ export default function TVPage({
                     {PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ??
                       "Source"}
                   </button>
-                  {/* Sub/Dub toggle for Zoroto */}
+                  {/* Sub/Dub toggle for AnimePahe */}
                   {playerSource === "allmanga" && (
                     <button
                       className="player-overlay-btn"

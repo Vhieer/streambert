@@ -510,180 +510,6 @@ function decodeHtmlAttr(value) {
     .replace(/&#039;/g, "'");
 }
 
-const ZOROTO_BASE = "https://www.zoroto.se";
-
-function zorotoHeaders(referer = ZOROTO_BASE) {
-  return {
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    Referer: referer,
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-  };
-}
-
-async function zorotoGet(pathOrUrl, referer = ZOROTO_BASE) {
-  const url = pathOrUrl.startsWith("http")
-    ? pathOrUrl
-    : ZOROTO_BASE + pathOrUrl;
-  return requestTextWithElectron(url, zorotoHeaders(referer), 18000);
-}
-
-function stripTags(html) {
-  return decodeHtmlAttr(String(html || "").replace(/<[^>]+>/g, " "))
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function zorotoSlug(title) {
-  return sanitizeTitle(title || "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function zorotoEpisodeSlugNumber(epStr) {
-  return String(epStr || "1").replace(/\./g, "-");
-}
-
-function parseZorotoSearchResults(html) {
-  const mainHtml = html.split(/<h[23][^>]*>\s*Quick Filter\s*<\/h[23]>/i)[0];
-  const results = [];
-  const seen = new Set();
-  for (const match of mainHtml.matchAll(
-    /<a[^>]+href=["'](https?:\/\/www\.zoroto\.se\/anime\/[^"']+)["'][^>]*>(.*?)<\/a>/gis,
-  )) {
-    const url = match[1];
-    if (seen.has(url)) continue;
-    const text = stripTags(match[2]);
-    const title = text.replace(/^(TV|Movie|Special|ONA|OVA)\s+/i, "").trim();
-    seen.add(url);
-    results.push({ url, title });
-  }
-  return results;
-}
-
-function selectZorotoResult(results, candidate) {
-  const wanted = sanitizeTitle(candidate).toLowerCase();
-  const wantedSlug = zorotoSlug(candidate);
-  return (
-    results.find((r) => sanitizeTitle(r.title || "").toLowerCase() === wanted) ||
-    results.find((r) => new URL(r.url).pathname.includes(`/anime/${wantedSlug}`)) ||
-    results.find((r) => zorotoSlug(r.title || "").includes(wantedSlug)) ||
-    null
-  );
-}
-
-function parseZorotoEpisodeLinks(html) {
-  const scopedBlocks = [...String(html || "").matchAll(/<div[^>]+class=["'][^"']*eplister[^"']*["'][\s\S]*?<\/ul>\s*<\/div>/gi)].map((m) => m[0]);
-  const sourceHtml = scopedBlocks.length ? scopedBlocks.join("\n") : html;
-  const links = [];
-  const seen = new Set();
-  for (const match of String(sourceHtml || "").matchAll(
-    /href=["'](https?:\/\/www\.zoroto\.se\/(?!anime\/|tag\/|genre\/|author\/|page\/|#)[^"'#]+\/)["']/gi,
-  )) {
-    const url = match[1];
-    if (seen.has(url)) continue;
-    seen.add(url);
-    links.push(url);
-  }
-  return links;
-}
-
-function extractZorotoIframe(html) {
-  const playerMatch = /<div[^>]+class=["'][^"']*player-embed[^"']*["'][\s\S]*?<iframe[^>]+src=["']([^"']+)["']/i.exec(html);
-  const iframe = playerMatch?.[1] || /<iframe[^>]+src=["']([^"']+)["']/i.exec(html)?.[1];
-  return iframe ? decodeHtmlAttr(iframe) : null;
-}
-
-async function resolveZoroto(candidates, epStr, dubSub, isMovie) {
-  const lastErrors = [];
-  const wantedEp = isMovie ? "1" : zorotoEpisodeSlugNumber(epStr);
-  const preferDub = dubSub === "dub";
-
-  for (const candidate of candidates) {
-    const candidateSlug = zorotoSlug(candidate);
-    const detailUrls = [];
-    try {
-      const search = await zorotoGet(`/?s=${encodeURIComponent(candidate)}`);
-      if (search.status === 200) {
-        const selected = selectZorotoResult(parseZorotoSearchResults(search.body), candidate);
-        if (selected?.url) detailUrls.push(selected.url);
-      } else {
-        lastErrors.push(`search HTTP ${search.status}`);
-      }
-    } catch (e) {
-      lastErrors.push(e.message);
-    }
-
-    if (candidateSlug) detailUrls.push(`${ZOROTO_BASE}/anime/${candidateSlug}/`);
-
-    for (const detailUrl of [...new Set(detailUrls)]) {
-      try {
-        const detail = await zorotoGet(detailUrl);
-        if (detail.status !== 200) {
-          lastErrors.push(`${detailUrl} HTTP ${detail.status}`);
-          continue;
-        }
-
-        const seriesSlug = /\/anime\/([^/]+)\//i.exec(new URL(detailUrl).pathname)?.[1] || candidateSlug;
-        const episodeLinks = parseZorotoEpisodeLinks(detail.body);
-        const episodeUrlCandidates = [];
-        if (isMovie) {
-          const preferredLinks = preferDub
-            ? episodeLinks.filter((url) => /-eng\/$/i.test(new URL(url).pathname))
-            : episodeLinks.filter((url) => !/-eng\/$/i.test(new URL(url).pathname));
-          episodeUrlCandidates.push(...preferredLinks, ...episodeLinks, detailUrl);
-        } else {
-          const matchingLinks = episodeLinks.filter((url) =>
-            new RegExp(`-episode-${wantedEp}(?:-eng)?(?:/|$)`, "i").test(new URL(url).pathname),
-          );
-          episodeUrlCandidates.push(
-            ...(preferDub
-              ? matchingLinks.filter((url) => /-eng\/$/i.test(new URL(url).pathname))
-              : matchingLinks.filter((url) => !/-eng\/$/i.test(new URL(url).pathname))),
-            ...matchingLinks,
-          );
-          if (seriesSlug) {
-            if (preferDub) episodeUrlCandidates.push(`${ZOROTO_BASE}/${seriesSlug}-episode-${wantedEp}-eng/`);
-            episodeUrlCandidates.push(`${ZOROTO_BASE}/${seriesSlug}-episode-${wantedEp}/`);
-          }
-        }
-
-        for (const episodeUrl of [...new Set(episodeUrlCandidates)].filter(Boolean)) {
-          const episode = await zorotoGet(episodeUrl, detailUrl);
-          if (episode.status !== 200) {
-            lastErrors.push(`${episodeUrl} HTTP ${episode.status}`);
-            continue;
-          }
-          const iframeUrl = extractZorotoIframe(episode.body);
-          if (!iframeUrl) {
-            lastErrors.push(`${episodeUrl} has no playable iframe`);
-            continue;
-          }
-          return {
-            ok: true,
-            url: iframeUrl,
-            sourceName: "Zoroto",
-            referer: episodeUrl,
-            searchTitle: candidate,
-          };
-        }
-      } catch (e) {
-        lastErrors.push(e.message);
-      }
-    }
-  }
-
-  return {
-    ok: false,
-    error: lastErrors.length
-      ? `Zoroto failed: ${lastErrors.at(-1)}`
-      : "Zoroto found no matching episode",
-  };
-}
-
 function normalizeAnimepaheQuality(qualityPreference) {
   const value = String(qualityPreference || "auto").toLowerCase();
   if (value === "auto") return "auto";
@@ -1516,12 +1342,12 @@ function register() {
         ]);
         const candidates = [...candidateSet].filter(Boolean);
 
-        // 2. Resolve through Zoroto only
-        const zoroto = await resolveZoroto(candidates, epStr, dubSub, isMovie);
-        if (zoroto.ok) return zoroto;
+        // 2. Resolve through AnimePahe/Kwik and keep the current local HLS player.
+        const animepahe = await resolveAnimepahe(candidates, epStr, dubSub, isMovie);
+        if (animepahe.ok) return animepahe;
         return {
           ok: false,
-          error: "Zoroto could not find a playable link for: " + searchTitle + ". " + zoroto.error,
+          error: "AnimePahe could not find a playable link for: " + searchTitle + ". " + animepahe.error,
         };
       } catch (e) {
         return { ok: false, error: e.message };

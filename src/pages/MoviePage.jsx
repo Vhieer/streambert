@@ -97,7 +97,7 @@ export default function MoviePage({
   saveProgressRef.current = saveProgress;
   const onMarkWatchedRef = useRef(onMarkWatched);
   onMarkWatchedRef.current = onMarkWatched;
-  // Zoroto async URL resolution
+  // AnimePahe async URL resolution
   const [resolvedPlayerUrl, setResolvedPlayerUrl] = useState(null);
   const [resolvingUrl, setResolvingUrl] = useState(false);
   const [resolveError, setResolveError] = useState(null);
@@ -290,7 +290,7 @@ export default function MoviePage({
     };
   }, [item.id, isAnime]);
 
-  // Resolve Zoroto movie URL via main-process IPC
+  // Resolve AnimePahe movie URL via main-process IPC
   useEffect(() => {
     if (!playing || !sourceIsAsync(playerSource)) return;
     if (resolvedPlayerUrl || resolvingUrl) return;
@@ -547,7 +547,7 @@ export default function MoviePage({
 
   // Intercept fullscreen requests from embedded players (vidsrc / 2embed use
   // the native Fullscreen API which would otherwise fullscreen the entire app).
-  // Videasy and Zoroto handle fullscreen internally via CSS, skip those.
+  // Videasy and anime HLS player handle fullscreen internally via CSS, skip those.
   useEffect(() => {
     if (!playing) return;
     if (!NEEDS_INTERCEPT.includes(playerSource)) return;
@@ -818,12 +818,12 @@ export default function MoviePage({
                 <div className="spinner" />
                 <span style={{ fontSize: 14, color: "var(--text2)" }}>
                   {resolvingUrl
-                    ? "Looking up movie on Zoroto…"
+                    ? "Looking up movie on AnimePahe…"
                     : `Loading ${PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ?? "source"}…`}
                 </span>
               </div>
             )}
-            {/* Zoroto: error if lookup failed */}
+            {/* AnimePahe: error if lookup failed */}
             {sourceIsAsync(playerSource) && resolveError && !resolvingUrl && (
               <div
                 style={{
@@ -841,7 +841,7 @@ export default function MoviePage({
               >
                 <span style={{ fontSize: 28 }}>⚠️</span>
                 <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                  Movie not found on Zoroto
+                  Movie not found on AnimePahe
                 </span>
                 <span style={{ fontSize: 12, color: "var(--text3)" }}>
                   {resolveError}
@@ -938,7 +938,7 @@ export default function MoviePage({
                 {PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ??
                   "Source"}
               </button>
-              {/* Sub/Dub toggle for Zoroto */}
+              {/* Sub/Dub toggle for AnimePahe */}
               {playerSource === "allmanga" && (
                 <button
                   className="player-overlay-btn"
