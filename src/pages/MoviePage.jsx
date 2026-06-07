@@ -51,15 +51,6 @@ import {
   getRatingCountry,
 } from "../utils/ageRating";
 
-const ANIME_QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
-const ANIME_QUALITY_LABELS = {
-  auto: "AUTO 1080P",
-  1080: "1080P",
-  720: "720P",
-  480: "480P",
-  360: "360P",
-};
-
 export default function MoviePage({
   item,
   apiKey,
@@ -96,9 +87,6 @@ export default function MoviePage({
   const [dubMode, setDubMode] = useState(
     () => storage.get("allmangaDubMode") || "sub",
   );
-  const [animeQuality, setAnimeQuality] = useState(
-    () => storage.get("animepaheQuality") || "auto",
-  );
   const [anilistData, setAnilistData] = useState(null);
   const [menuPos, setMenuPos] = useState(null);
   const sourceRef = useRef(null);
@@ -109,7 +97,7 @@ export default function MoviePage({
   saveProgressRef.current = saveProgress;
   const onMarkWatchedRef = useRef(onMarkWatched);
   onMarkWatchedRef.current = onMarkWatched;
-  // AnimePahe async URL resolution
+  // Zoroto async URL resolution
   const [resolvedPlayerUrl, setResolvedPlayerUrl] = useState(null);
   const [resolvingUrl, setResolvingUrl] = useState(false);
   const [resolveError, setResolveError] = useState(null);
@@ -270,7 +258,7 @@ export default function MoviePage({
     setResolvingUrl(false);
     setResolveError(null);
     setWebviewLoading(true); // instantly blank the player on every source/item switch
-  }, [item.id, playerSource, dubMode, animeQuality]);
+  }, [item.id, playerSource, dubMode]);
 
   // Fetch AniList data + auto-set source for anime/non-anime
   useEffect(() => {
@@ -302,7 +290,7 @@ export default function MoviePage({
     };
   }, [item.id, isAnime]);
 
-  // Resolve AnimePahe movie URL via main-process IPC
+  // Resolve Zoroto movie URL via main-process IPC
   useEffect(() => {
     if (!playing || !sourceIsAsync(playerSource)) return;
     if (resolvedPlayerUrl || resolvingUrl) return;
@@ -317,7 +305,6 @@ export default function MoviePage({
         episodeNumber: 1,
         isMovie: true,
         translationType: dubMode,
-        quality: animeQuality,
       })
       .then((res) => {
         if (!mounted) return;
@@ -354,7 +341,7 @@ export default function MoviePage({
     return () => {
       mounted = false;
     };
-  }, [playing, playerSource, dubMode, animeQuality]);
+  }, [playing, playerSource, dubMode]);
 
   useEffect(() => {
     if (!window.electron) return;
@@ -560,7 +547,7 @@ export default function MoviePage({
 
   // Intercept fullscreen requests from embedded players (vidsrc / 2embed use
   // the native Fullscreen API which would otherwise fullscreen the entire app).
-  // Videasy and AnimePahe handle fullscreen internally via CSS, skip those.
+  // Videasy and Zoroto handle fullscreen internally via CSS, skip those.
   useEffect(() => {
     if (!playing) return;
     if (!NEEDS_INTERCEPT.includes(playerSource)) return;
@@ -831,12 +818,12 @@ export default function MoviePage({
                 <div className="spinner" />
                 <span style={{ fontSize: 14, color: "var(--text2)" }}>
                   {resolvingUrl
-                    ? "Looking up movie on AnimePahe…"
+                    ? "Looking up movie on Zoroto…"
                     : `Loading ${PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ?? "source"}…`}
                 </span>
               </div>
             )}
-            {/* AnimePahe: error if lookup failed */}
+            {/* Zoroto: error if lookup failed */}
             {sourceIsAsync(playerSource) && resolveError && !resolvingUrl && (
               <div
                 style={{
@@ -854,7 +841,7 @@ export default function MoviePage({
               >
                 <span style={{ fontSize: 28 }}>⚠️</span>
                 <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                  Movie not found on AnimePahe
+                  Movie not found on Zoroto
                 </span>
                 <span style={{ fontSize: 12, color: "var(--text3)" }}>
                   {resolveError}
@@ -951,7 +938,7 @@ export default function MoviePage({
                 {PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ??
                   "Source"}
               </button>
-              {/* Sub/Dub toggle for AnimePahe */}
+              {/* Sub/Dub toggle for Zoroto */}
               {playerSource === "allmanga" && (
                 <button
                   className="player-overlay-btn"
@@ -968,31 +955,6 @@ export default function MoviePage({
                   title="Toggle Sub/Dub"
                 >
                   {dubMode === "sub" ? "SUB" : "DUB"}
-                </button>
-              )}
-              {playerSource === "allmanga" && (
-                <button
-                  className="player-overlay-btn"
-                  onClick={() => {
-                    const current = ANIME_QUALITY_OPTIONS.includes(animeQuality)
-                      ? animeQuality
-                      : "auto";
-                    const next =
-                      ANIME_QUALITY_OPTIONS[
-                        (ANIME_QUALITY_OPTIONS.indexOf(current) + 1) %
-                          ANIME_QUALITY_OPTIONS.length
-                      ];
-                    setAnimeQuality(next);
-                    storage.set("animepaheQuality", next);
-                    setM3u8Url(null);
-                    setInterceptedSubs([]);
-                    setResolvedPlayerUrl(null);
-                    setResolvingUrl(false);
-                    setResolveError(null);
-                  }}
-                  title="Change AnimePahe quality"
-                >
-                  {ANIME_QUALITY_LABELS[animeQuality] || "AUTO 1080P"}
                 </button>
               )}
               {/* Blocked ads & trackers button */}

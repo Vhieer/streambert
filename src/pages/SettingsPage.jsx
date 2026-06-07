@@ -3499,7 +3499,7 @@ export default function SettingsPage({
               to detect and skip opening/ending segments. Only active for animes
               and when using{" "}
               <span style={{ color: "var(--text)", fontWeight: 600 }}>
-                AnimePahe
+                Zoroto
               </span>{" "}
               as source.
             </div>

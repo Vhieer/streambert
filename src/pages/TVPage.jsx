@@ -362,15 +362,6 @@ const INJECT_SKIP_CONTROLS = `
 })();
 `;
 
-const ANIME_QUALITY_OPTIONS = ["auto", "1080", "720", "480", "360"];
-const ANIME_QUALITY_LABELS = {
-  auto: "AUTO 1080P",
-  1080: "1080P",
-  720: "720P",
-  480: "480P",
-  360: "360P",
-};
-
 export default function TVPage({
   item,
   apiKey,
@@ -419,9 +410,6 @@ export default function TVPage({
   );
   const [dubMode, setDubMode] = useState(
     () => storage.get("allmangaDubMode") || "sub",
-  );
-  const [animeQuality, setAnimeQuality] = useState(
-    () => storage.get("animepaheQuality") || "auto",
   );
   // async URL resolution
   const [resolvedPlayerUrl, setResolvedPlayerUrl] = useState(null);
@@ -624,7 +612,6 @@ export default function TVPage({
     selectedSeason,
     playerSource,
     dubMode,
-    animeQuality,
   ]);
 
   // Fetch AniList metadata + auto-set anime source
@@ -669,7 +656,7 @@ export default function TVPage({
     };
   }, [item.id, isAnime]);
 
-  // Resolve AnimePahe episode URL via main-process IPC (GraphQL, no CORS)
+  // Resolve Zoroto episode URL via main-process IPC (GraphQL, no CORS)
   useEffect(() => {
     if (!playing || !selectedEp || !isAsync) return;
     if (resolvedPlayerUrl || resolvingUrl) return;
@@ -685,7 +672,6 @@ export default function TVPage({
         seasonNumber: selectedSeason,
         episodeNumber: epNum,
         translationType: dubMode,
-        quality: animeQuality,
       })
       .then((res) => {
         if (!mounted) return;
@@ -723,7 +709,7 @@ export default function TVPage({
     return () => {
       mounted = false;
     };
-  }, [playing, selectedEp, playerSource, selectedSeason, dubMode, animeQuality]);
+  }, [playing, selectedEp, playerSource, selectedSeason, dubMode]);
 
   useEffect(() => {
     if (!playing) {
@@ -789,7 +775,7 @@ export default function TVPage({
     [d.seasons],
   );
   // tmdbSeasonsWithSpecials includes season 0 for display purposes.
-  // Excluded for anime: AnimePahe
+  // Excluded for anime: Zoroto
   const tmdbSeasonsWithSpecials = useMemo(() => {
     if (isAnime) return tmdbSeasons;
     if (failedSeasons.has(0)) return tmdbSeasons;
@@ -1348,7 +1334,7 @@ export default function TVPage({
     } catch {}
   }, []);
 
-  // Intentionally disable custom injected skip controls for AnimePahe webview.
+  // Intentionally disable custom injected skip controls for Zoroto webview.
   // We keep native video controls only (same behavior style as MoviePage),
   // because injected keyboard handlers can desync play/pause after seek.
 
@@ -1380,7 +1366,7 @@ export default function TVPage({
 
   // Intercept fullscreen requests from embedded players (vidsrc / 2embed use
   // the native Fullscreen API which would otherwise fullscreen the entire app).
-  // Videasy and AnimePahe handle fullscreen internally via CSS, skip those.
+  // Videasy and Zoroto handle fullscreen internally via CSS, skip those.
   useEffect(() => {
     if (!playing) return;
     if (!NEEDS_INTERCEPT.includes(playerSource)) return;
@@ -1605,7 +1591,7 @@ export default function TVPage({
                     <div className="spinner" />
                     <span style={{ fontSize: 14, color: "var(--text2)" }}>
                       {resolvingUrl
-                        ? "Looking up episode on AnimePahe…"
+                        ? "Looking up episode on Zoroto…"
                         : `Loading ${PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ?? "source"}…`}
                     </span>
                   </div>
@@ -1628,7 +1614,7 @@ export default function TVPage({
                   >
                     <span style={{ fontSize: 28 }}>⚠️</span>
                     <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                      Episode not found on AnimePahe
+                      Episode not found on Zoroto
                     </span>
                     <span style={{ fontSize: 12, color: "var(--text3)" }}>
                       {resolveError}
@@ -1735,7 +1721,7 @@ export default function TVPage({
                     {PLAYER_SOURCES.find((s) => s.id === playerSource)?.label ??
                       "Source"}
                   </button>
-                  {/* Sub/Dub toggle for AnimePahe */}
+                  {/* Sub/Dub toggle for Zoroto */}
                   {playerSource === "allmanga" && (
                     <button
                       className="player-overlay-btn"
@@ -1752,31 +1738,6 @@ export default function TVPage({
                       title="Toggle Sub/Dub"
                     >
                       {dubMode === "sub" ? "SUB" : "DUB"}
-                    </button>
-                  )}
-                  {playerSource === "allmanga" && (
-                    <button
-                      className="player-overlay-btn"
-                      onClick={() => {
-                        const current = ANIME_QUALITY_OPTIONS.includes(animeQuality)
-                          ? animeQuality
-                          : "auto";
-                        const next =
-                          ANIME_QUALITY_OPTIONS[
-                            (ANIME_QUALITY_OPTIONS.indexOf(current) + 1) %
-                              ANIME_QUALITY_OPTIONS.length
-                          ];
-                        setAnimeQuality(next);
-                        storage.set("animepaheQuality", next);
-                        setM3u8Url(null);
-                        setInterceptedSubs([]);
-                        setResolvedPlayerUrl(null);
-                        setResolvingUrl(false);
-                        setResolveError(null);
-                      }}
-                      title="Change AnimePahe quality"
-                    >
-                      {ANIME_QUALITY_LABELS[animeQuality] || "AUTO 1080P"}
                     </button>
                   )}
                   {/* Blocked ads & trackers button */}
